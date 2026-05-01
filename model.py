@@ -100,7 +100,7 @@ class DoubleUpConv(nn.Module):
             padding=0,
             bias=True
           ),
-          nn.GroupNorm(3, 3)
+          nn.GroupNorm(1, 3)
         )
     
   def forward(self, X):
@@ -210,8 +210,6 @@ class VAE(nn.Module):
     )
     
     self.last_decoder_layer = nn.Sequential(
-      nn.GroupNorm(1, 3),
-      
       nn.Conv2d(
         in_channels=3,
         out_channels=3,
@@ -241,7 +239,7 @@ class VAE(nn.Module):
     return mean, logvar    
   
   def decode(self, z):
-    h = self.z_2_hid(z).view(-1, 256, 128//2**4, 128//2**4)
+    h = self.z_2_hid(z)
     out = self.last_decoder_layer(self.decoder(h))
     
     return out

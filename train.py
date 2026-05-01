@@ -42,28 +42,27 @@ class FlowerDataset(Dataset):
 def main():
   transforms = TT.Compose([
     TT.Resize((200, 200)),
-    TT.RandomCrop((128, 128)),
+    TT.CenterCrop((128, 128)),
     TT.RandomHorizontalFlip(0.5),
-    TT.ColorJitter(0.3, 0.2, 0.2, 0.15),
+    TT.ColorJitter(0.15, 0.1, 0.1, 0.05),
     TT.ToTensor(),
     TT.Normalize([0.485, 0.456, 0.406],
-                 [0.229, 0.224, 0.225]),
-    TT.RandomErasing(p=0.4)
+                 [0.229, 0.224, 0.225])
   ])
   
   train_ds = FlowerDataset('data/', transforms)
   train_dl = DataLoader(
     train_ds,
-    batch_size=64,
+    batch_size=128,
     shuffle=True
   )
-  
   
   model = VAE().to(DEVICE)
   
   optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-  def loss_fn (y_preds, y, logvar, mean, beta=1.0):
-    return F.mse_loss(y_preds, y, reduction='mean'), beta * (-0.5 * torch.mean(1 + logvar - mean**2 - torch.exp(logvar)))
+  def loss_fn (y_preds, y, mean, logvar, beta=1.0):
+    batch_size = y.shape[0]
+    return F.mse_loss(y_preds, y, reduction='sum') / batch_size, beta * ((-0.5 * torch.sum(1 + logvar - mean**2 - torch.exp(logvar))) / batch_size)
   
   
   epochs = 128
@@ -92,6 +91,7 @@ def main():
 
       optimizer.zero_grad()
       loss.backward()
+      #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
       optimizer.step()
       
 
@@ -116,7 +116,8 @@ def main():
         best_model_path = os.path.join(save_dir, "best_model.pth")
         
         torch.save(model.state_dict(), best_model_path)
-        print(f"########################################\n!!!NEW BEST MODEL SAVED!!! (Loss: {best_loss:.5f})\n########################################")
-  
+        print(f"##########################################\n!!!NEW BEST MODEL SAVED!!! (Loss: {best_loss:.5f})\n##########################################\n")
+        
+        
 if __name__ == '__main__':
   main()
