@@ -65,7 +65,7 @@ class DoubleUpConv(nn.Module):
         nn.GroupNorm(8, c_out),
         nn.GELU(),
         
-        nn.Upsample(scale_factor=2, mode='bilinear'),
+        nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
         nn.GroupNorm(8, c_out)
       )
     else:
@@ -92,15 +92,16 @@ class DoubleUpConv(nn.Module):
           nn.GroupNorm(3, 3),
           nn.GELU(),
           
-          nn.ConvTranspose2d(
+          nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+          
+          nn.Conv2d(
             in_channels=c_out,
             out_channels=c_out,
-            kernel_size=2,
-            stride=2,
-            padding=0,
+            kernel_size=3,
+            padding=1,
+            stride=1,
             bias=True
           ),
-          nn.GroupNorm(1, 3)
         )
     
   def forward(self, X):
@@ -108,7 +109,7 @@ class DoubleUpConv(nn.Module):
 
 
 class VAE(nn.Module):
-  def __init__(self, num_layers=4, hid_c_dim=256, z_dim=80):
+  def __init__(self, num_layers=4, hid_c_dim=256, z_dim=256):
     super().__init__()
     
     self.encoder = nn.Sequential(

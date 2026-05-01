@@ -10,7 +10,7 @@ from model import VAE
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'mps'
 
-def show_samples(n=10):
+def show_samples(n=30):
   model = VAE().to(DEVICE)
   model.eval()
   
@@ -30,7 +30,9 @@ def show_samples(n=10):
   transforms = TT.Compose([
     TT.Resize((200, 200)),
     TT.CenterCrop((128, 128)),
-    TT.ToTensor()
+    TT.ToTensor(),
+    TT.Normalize([0.485, 0.456, 0.406],
+                 [0.229, 0.224, 0.225])
   ])
   
   for p in disp_paths:
@@ -48,7 +50,13 @@ def show_samples(n=10):
   z_all = means + stds * torch.randn_like(means)
   
   with torch.no_grad():
-    outs = torch.sigmoid(model.decode(z_all))
+    outs = model.decode(z_all)
+    
+    mean_tensor = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(DEVICE)
+    std_tensor = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(DEVICE)
+    
+    outs = outs * std_tensor + mean_tensor
+    outs = torch.clamp(outs, 0, 1)
     
   for i in range(n):
     s = outs[i].squeeze().cpu().numpy().transpose(1, 2, 0)

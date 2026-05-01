@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as TT
 from torch.utils.data import Dataset, DataLoader
+from torchvision.models import vgg16, VGG16_Weights
 import os
 from PIL import Image
 from tqdm.auto import tqdm
@@ -12,6 +13,25 @@ from model import VAE
 DEVICE = 'cuda' if torch.cuda.is_available() else 'mps'
 
 
+class VGGLoss(nn.Module):
+  def __init__(self, weight, device):
+    super().__init__()
+    self.weight = weight
+    
+    vgg = vgg16(weights=VGG16_Weights.IMAGENET1K_V1).features.to(device).eval()
+
+    self.selected_layers = nn.Sequential(*list(vgg.children())[:23])
+    
+    for p in self.selected_layers.parameters():
+      p.requires_grad_(False)
+      
+  def forward(self, x, y):
+    x_features = self.selected_layers(x)
+    y_features = self.selected_layers(y)
+    
+    return self.weight * F.mse_loss(x_features, y_features)
+  
+  
 class FlowerDataset(Dataset):
   def __init__(self, root_dir, transform=None):
     self.root_dir = root_dir
@@ -58,9 +78,10 @@ def main():
   model = VAE().to(DEVICE)
   
   optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-  def loss_fn (y_preds, y, mean, logvar, beta=1000.0):
+  feat_loss = VGGLoss(weight=0.6, device=DEVICE)
+  def loss_fn (y_preds, y, mean, logvar, beta=1.0):
     batch_size = y.shape[0]
-    return F.mse_loss(y_preds, y, reduction='sum') / batch_size, beta * ((-0.5 * torch.sum(1 + logvar - mean**2 - torch.exp(logvar))) / batch_size)
+    return F.mse_loss(y_preds, y, reduction='sum') / batch_size, beta * ((-0.5 * torch.sum(1 + logvar - mean**2 - torch.exp(logvar))) / batch_size), feat_loss(y_preds, y)
   
   
   epochs = 128
@@ -74,18 +95,20 @@ def main():
     
     rec_losses = []
     kl_losses = []
+    feat_losses = []
     
     for n_batch, X in enumerate(train_dl):
       X = X.to(DEVICE)
       
       y_preds, mean, logvar = model(X)
       
-      rec_loss, kl_loss = loss_fn(y_preds, X, mean, logvar)
+      rec_loss, kl_loss, feat_loss = loss_fn(y_preds, X, mean, logvar)
 
-      loss = rec_loss + kl_loss
+      loss = rec_loss + kl_loss + feat_loss
       
       rec_losses.append(rec_loss.item())
       kl_losses.append(kl_loss.item())
+      feat_losses.append(feat_loss.item())
 
       optimizer.zero_grad()
       loss.backward()
@@ -93,12 +116,13 @@ def main():
       optimizer.step()
       
 
-    avg_rec_loss = sum(rec_losses)/len(rec_losses)
-    avg_kl_loss = sum(kl_losses)/len(kl_losses)
-    total_epoch_loss = avg_rec_loss + avg_kl_loss
+    avg_rec_loss = sum(rec_losses) / len(rec_losses)
+    avg_kl_loss = sum(kl_losses) / len(kl_losses)
+    avg_feat_loss = sum(feat_losses) / len(feat_losses)
+    total_epoch_loss = avg_rec_loss + avg_kl_loss + avg_feat_loss
     
     print(f"\nEpoch: {epoch}")
-    print(f"REC Loss: {avg_rec_loss:.5f} | KL Loss: {avg_kl_loss:.5f}")
+    print(f"Rec Loss: {avg_rec_loss:.5f} | KL Loss: {avg_kl_loss:.5f} | Feat Loss: {avg_feat_loss:.5f}")
     
     epoch_checkpoint_path = os.path.join(save_dir, f"vae_epoch_{epoch+1}.pth")
     torch.save({
