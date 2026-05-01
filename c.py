@@ -110,7 +110,7 @@ class DoubleUpConv(nn.Module):
 
 
 class VAE(nn.Module):
-  def __init__(self, num_layers=4, hid_c_dim=256, z_dim=64):
+  def __init__(self, num_layers=4, hid_c_dim=256, z_dim=80):
     super().__init__()
     
     self.encoder = nn.Sequential(
