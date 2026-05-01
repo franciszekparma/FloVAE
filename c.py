@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-device = 'cuda' if torch.cuda.is_available() else 'mps'
 
 class DoubleDownConv(nn.Module):
   def __init__(self, c_in, c_out):
@@ -106,7 +105,6 @@ class DoubleUpConv(nn.Module):
     
   def forward(self, X):
     return self.double_conv(X)
-
 
 
 class VAE(nn.Module):
@@ -235,7 +233,6 @@ class VAE(nn.Module):
       )
     )
     
-  
   def encode(self, img):
     B = img.shape[0]
     
@@ -257,29 +254,3 @@ class VAE(nn.Module):
     out = self.decode(z_reparam)
     
     return out, mean, std
-  
-
-def count_params(model):
-    total_params = 0
-
-    print("\n=== PARAMETER COUNT PER LAYER ===\n")
-
-    for name, module in model.named_modules():
-        params = sum(p.numel() for p in module.parameters(recurse=False))
-
-        if params > 0:
-            print(f"{name:50s} -> {params:,}")
-            total_params += params
-
-    print("\n==============================")
-    print(f"TOTAL PARAMETERS: {total_params:,}")
-    print("==============================\n")
-
-
-if __name__ == '__main__':
-    model = VAE().to(device)
-
-    count_params(model)
-
-    x = torch.randn((32, 3, 128, 128)).to(device)
-    out, mean, std = model(x)
