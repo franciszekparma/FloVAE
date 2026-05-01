@@ -244,7 +244,7 @@ class VAE(nn.Module):
     h = self.z_2_hid(z).view(-1, 256, 128//2**4, 128//2**4)
     out = self.last_decoder_layer(self.decoder(h))
     
-    return F.tanh(out)
+    return out
   
   def forward(self, X):
     mean, logvar = self.encode(X)
@@ -253,4 +253,4 @@ class VAE(nn.Module):
     z_reparam = mean + std * torch.randn_like(mean)
     out = self.decode(z_reparam)
     
-    return out, mean, std
+    return out, mean, logvar
