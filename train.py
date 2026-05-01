@@ -34,9 +34,7 @@ class FlowerDataset(Dataset):
     if self.transform:
       image = self.transform(image)
 
-    return image
-  
-  
+    return image  
   
 
 def main():
@@ -60,7 +58,7 @@ def main():
   model = VAE().to(DEVICE)
   
   optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-  def loss_fn (y_preds, y, mean, logvar, beta=1.0):
+  def loss_fn (y_preds, y, mean, logvar, beta=1000.0):
     batch_size = y.shape[0]
     return F.mse_loss(y_preds, y, reduction='sum') / batch_size, beta * ((-0.5 * torch.sum(1 + logvar - mean**2 - torch.exp(logvar))) / batch_size)
   
