@@ -33,7 +33,7 @@ RESUME_EPOCH = 128  # epoch number used to build the resume filename
 DISP_EPOCH = 256    # epoch number used in disp_outs to load weights
 
 # Display
-N_SAMPLES = 10
+N_SAMPLES = 8
 
 # Weights
 LOAD_WEIGHTS = True
