@@ -1,6 +1,6 @@
 <div align="center">
 
-# Flower VAE
+# FloVAE
 
 **A from-scratch PyTorch Variational Autoencoder that reconstructs and generates 128×128 flower images from a 256-dimensional latent space.**
 
