@@ -1,7 +1,15 @@
-data
-.history
-checkpoints
-__pycache__
+# Data
+data/
+
+# Checkpoints — keep best_model.pth, ignore everything else
+checkpoints/*.pth
+!checkpoints/best_model.pth
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.history/
+
+# OS
 .DS_Store
-checkpoints_avg_model
-c.py
