@@ -1,6 +1,6 @@
 # Flower VAE
 
-A from-scratch PyTorch implementation of a Variational Autoencoder that learns to reconstruct and generate 128x128 flower images from a 256-dimensional latent space.
+> A from-scratch PyTorch Variational Autoencoder that reconstructs and generates 128×128 flower images from a 256-dimensional latent space.
 
 <p align="center">
   <img src="samples/fig_1.png" width="128" />
@@ -10,126 +10,85 @@ A from-scratch PyTorch implementation of a Variational Autoencoder that learns t
   <img src="samples/fig_5.png" width="128" />
 </p>
 
-<p align="center"><i>Selected reconstructions from the trained VAE.</i></p>
+<p align="center"><sub><i>Selected reconstructions from the trained VAE.</i></sub></p>
+
+<p align="center">
+  <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white" />
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white" />
+  <img alt="Apple Silicon" src="https://img.shields.io/badge/Trained_on-M4_Max-555555?logo=apple&logoColor=white" />
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green" />
+</p>
 
 ---
 
 ## Why a VAE?
 
-A vanilla autoencoder learns to compress an image into a code and reconstruct it. Nothing constrains where those codes land in latent space, so the encoder is free to scatter them into a discrete, jagged manifold full of holes. Sample a random point and decode it and you get noise — there is no reason a point between two training codes corresponds to anything meaningful.
+A vanilla autoencoder learns to compress an image into a code and reconstruct it — but nothing constrains where those codes land. Sample a random point and decode it: noise.
 
-A **Variational Autoencoder** fixes this by treating the encoder as a probabilistic mapping. Instead of producing one code per image, it outputs the parameters of a Gaussian — a mean μ and a log-variance log σ² — and a KL divergence term pulls every per-image Gaussian toward the standard normal prior **N(0, I)**. The latent space becomes continuous and densely populated: nearby points decode into perceptually similar images, and pure samples from N(0, I) fall on the data manifold.
+A **Variational Autoencoder** treats the encoder as a probabilistic mapping. Each image yields a Gaussian `N(μ, σ²)`, and a KL term pulls every per-image posterior toward the prior `N(0, I)`. The latent space becomes continuous: nearby points decode to perceptually similar images, and pure samples from `N(0, I)` land on the data manifold.
 
-The catch is that sampling z ~ N(μ, σ²) is non-differentiable. The **reparameterization trick** rewrites the sample as a deterministic function of μ, σ, and an external noise source ε:
+Sampling `z ~ N(μ, σ²)` is non-differentiable, so the **reparameterization trick** moves the randomness outside the graph:
 
 ```
 z = μ + σ · ε,    ε ~ N(0, I)
 ```
 
-Now the randomness lives outside the computation graph, and gradients flow cleanly through μ and σ back into the encoder.
-
-The full training objective combines three terms:
+The training objective:
 
 ```
-L  =  MSE(x̂, x)                    ← reconstruction
-   +  β · KL( N(μ, σ²)  ‖  N(0, I) )    ← latent regularization
-   +  λ · ‖ φ(x̂) - φ(x) ‖²              ← perceptual loss
+L  =  MSE(x̂, x)                       ← reconstruction
+   +  β · KL( N(μ, σ²) ‖ N(0, I) )    ← latent regularization
+   +  λ · ‖ φ(x̂) − φ(x) ‖²            ← perceptual loss (VGG16, relu4_3)
 ```
 
-where φ is the VGG16 feature extractor up to relu4_3 (layers 0–22).
-
-**Why add VGG perceptual loss on top of pixel MSE?** Pixel-wise MSE has a well-known failure mode: averaging over all plausible reconstructions of a slightly uncertain region gives the *blurry* average. The model is rewarded for hedging. VGG features, by contrast, encode texture and structure — matching them in feature space forces the decoder to commit to specific edges, petal patterns, and color transitions instead of smearing them out.
+> **Why VGG perceptual loss?** Pixel MSE rewards hedging — averaging over plausible reconstructions yields blur. Matching VGG features forces the decoder to commit to specific edges, petal patterns, and color transitions.
 
 ---
 
-## How It Works
+## Architecture
 
-### The Encoder
-
-Takes a 3×128×128 image and produces the parameters of a 256-dimensional Gaussian. Spatial resolution is halved at every stage by `MaxPool2d(2)`; channels grow to compensate.
+### Encoder · `(3, 128, 128) → μ, log σ² ∈ ℝ²⁵⁶`
 
 ```
 img (3, 128, 128)
-    ↓  DoubleDownConv(3 → 32)            → (32,  64, 64)
-    ↓  DoubleDownConv(32 → 64)           → (64,  32, 32)
-    ↓  DoubleDownConv(64 → 128)          → (128, 16, 16)
-    ↓  DoubleDownConv(128 → 256)         → (256,  8,  8)
-    ↓  last_encoder_layer (refine 256ch) → (256,  8,  8)
-    ↓  hid_2_mean    : Conv → AdaptiveAvgPool(4,4) → Flatten → Linear → μ      ∈ R^256
-    ↓  hid_2_logvar  : Conv → AdaptiveAvgPool(4,4) → Flatten → Linear → log σ² ∈ R^256
+  ↓ DoubleDownConv ×4    →  (256, 8, 8)
+  ↓ refine (Conv → GN → GELU → Conv)
+  ↓ ┌─ hid_2_mean    : Conv → AdaptiveAvgPool(4,4) → MLP → μ
+    └─ hid_2_logvar  : Conv → AdaptiveAvgPool(4,4) → MLP → log σ²
 ```
 
-Each `DoubleDownConv` block is:
+Each `DoubleDownConv` = `Conv → GN → GELU → Conv → GN → GELU → MaxPool(2)`.
+
+### Decoder · `z ∈ ℝ²⁵⁶ → (3, 128, 128)`
 
 ```
-Conv3×3 → GroupNorm → GELU  →  Conv3×3 → GroupNorm → GELU  →  MaxPool2d(2)
+z (256)
+  ↓ Linear → Unflatten(128, 8, 8) → Conv → GN → GELU
+  ↓ DoubleUpConv ×4      →  (3, 128, 128)
+  ↓ refine RGB
 ```
 
-The two heads `hid_2_mean` and `hid_2_logvar` share the same shape (a 1×1 conv to 128 channels, an `AdaptiveAvgPool2d((4,4))` that collapses the spatial grid, and a small MLP with `LayerNorm` + dropout) but have independent weights, so the network can decouple "where the code is" from "how confident I am in it."
+Each `DoubleUpConv` = `Conv → GN → GELU → Conv → GN → GELU → Upsample(bilinear, ×2)`.
 
-### The Decoder
+### Design choices
 
-Takes a 256-d sample z and progressively upsamples it back to a 3×128×128 image.
-
-```
-z ∈ R^256
-    ↓  Linear → Unflatten to (128, 8, 8) → Conv → GroupNorm → GELU
-    ↓  DoubleUpConv(256 → 128)              → (128, 16, 16)
-    ↓  DoubleUpConv(128 → 64)               → (64,  32, 32)
-    ↓  DoubleUpConv(64  → 32)               → (32,  64, 64)
-    ↓  DoubleUpConv(32  → 3,  last=True)    → (3,  128, 128)
-    ↓  last_decoder_layer (refine 3ch RGB)
-```
-
-Each `DoubleUpConv` block is:
-
-```
-Conv3×3 → GroupNorm → GELU  →  Conv3×3 → GroupNorm → GELU  →  Upsample(scale=2, bilinear)
-```
-
-A few choices in the encoder/decoder are deliberate:
-
-**GroupNorm instead of BatchNorm.** BatchNorm normalizes activations using statistics computed across the batch dimension. When the batch is small or the per-sample statistics are highly variable, those running statistics become noisy and unstable, and they leak information between samples in a way that is especially problematic for VAEs (where the per-sample posterior matters). GroupNorm splits channels into groups and normalizes each group within a single sample — no batch coupling, no train/eval drift.
-
-**Bilinear upsampling + Conv instead of ConvTranspose2d.** `ConvTranspose2d` with stride 2 and a kernel that is not a multiple of the stride creates uneven overlap between adjacent kernel windows, which produces visible **checkerboard artifacts** in the output (Odena et al., 2016). Decoupling the upsample from the learned filter — bilinear upsampling first, then a regular `Conv2d` — eliminates the overlap problem entirely while letting the conv learn whatever refinement it needs.
+| Choice | Why |
+|---|---|
+| **GroupNorm** instead of BatchNorm | No batch coupling, no train/eval drift — important when per-image posteriors matter. |
+| **Bilinear upsample + Conv** instead of `ConvTranspose2d` | Avoids checkerboard artifacts (Odena et al., 2016). |
+| **Two independent heads** for μ and log σ² | Decouples *where the code is* from *how confident the encoder is*. |
 
 ---
 
-## The Loss Function
-
-The total loss is a sum of three components, all averaged over the batch:
-
-**1. Reconstruction (pixel MSE).** Sum of squared pixel errors, divided by batch size. Drives the decoder to reproduce the input.
+## Loss
 
 ```python
 rec_loss = F.mse_loss(y_preds, y, reduction='sum') / batch_size
+kl_loss  = beta * (-0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp())) / batch_size
+p_loss   = vgg_weight * F.mse_loss(vgg(y_preds), vgg(y))
 ```
 
-**2. KL divergence.** Closed-form KL between the per-image Gaussian and the standard normal prior. Pulls the aggregate posterior toward N(0, I) so the latent space stays sample-able.
-
-```python
-kl_loss = beta * (-0.5 * torch.sum(1 + logvar - mean**2 - torch.exp(logvar))) / batch_size
-```
-
-`KL_BETA = 1.0` recovers the standard β-VAE formulation. Lower β biases toward sharper reconstructions at the cost of a less regular latent space; higher β biases toward a cleaner prior at the cost of mode collapse and blur.
-
-**3. Perceptual loss (VGG16 features).** MSE in the feature space of a frozen ImageNet-pretrained VGG16, taken up to relu4_3 (layers 0–22). Multiplied by a large weight because feature-space activations are numerically much smaller than pixel-space differences.
-
-```python
-class VGGLoss(nn.Module):
-    def __init__(self, weight, device):
-        super().__init__()
-        self.weight = weight
-        vgg = vgg16(weights=VGG16_Weights.IMAGENET1K_V1).features.to(device).eval()
-        self.selected_layers = nn.Sequential(*list(vgg.children())[:23])
-        for p in self.selected_layers.parameters():
-            p.requires_grad_(False)
-
-    def forward(self, x, y):
-        return self.weight * F.mse_loss(self.selected_layers(x), self.selected_layers(y))
-```
-
-`VGG_LOSS_WEIGHT = 10000` is not arbitrary. Pixel-MSE on 128×128 RGB images sits in the thousands when summed; VGG feature-MSE at relu4_3 sits in the 10⁻¹–10⁻² range. The weight rescales the perceptual term so it actually contends with the reconstruction term during gradient updates instead of getting steamrolled.
+`KL_BETA = 1.0` recovers standard β-VAE. `VGG_LOSS_WEIGHT = 10000` rescales the perceptual term — feature-MSE at relu4_3 sits around 10⁻¹–10⁻², while pixel-MSE on 128×128 RGB sits in the thousands.
 
 ---
 
@@ -137,14 +96,14 @@ class VGGLoss(nn.Module):
 
 ```
 .
-├── model.py            # Encoder, Decoder, VAE with reparameterization
-├── train.py            # Training loop, VGG perceptual loss, checkpointing
-├── config.py           # All hyperparameters and paths
-├── vis_outs.py         # Load checkpoint, reconstruct and display samples
-├── docs/
-│   └── TRAINING.md     # Detailed training and resuming notes
-├── samples/            # Example reconstructions from the trained model
-├── checkpoints/        # Model weights — not tracked (except best_model.pth)
+├── code/
+│   ├── model.py        # Encoder, Decoder, VAE with reparameterization
+│   ├── train.py        # Training loop, VGG perceptual loss, checkpointing
+│   ├── config.py       # All hyperparameters and paths
+│   └── vis_outs.py     # Load checkpoint, reconstruct and display samples
+├── docs/TRAINING.md    # Detailed training and resuming notes
+├── samples/            # Example reconstructions
+├── checkpoints/        # Model weights — not tracked
 ├── data/               # Oxford 102 Flower images — not tracked
 ├── requirements.txt
 └── README.md
@@ -152,23 +111,7 @@ class VGGLoss(nn.Module):
 
 ---
 
-## Dataset
-
-Trained on the **Oxford 102 Category Flower Dataset** (Nilsback & Zisserman, 2008) — 8,189 images across 102 flower categories.
-
-- Images are resized to 140×140 and **center-cropped** to 128×128.
-- Normalized with ImageNet statistics (`mean = [0.485, 0.456, 0.406]`, `std = [0.229, 0.224, 0.225]`) so VGG's feature extractor sees inputs in the distribution it was trained on.
-- Light augmentation during training: random horizontal flip, saturation boost, color jitter.
-
-The dataset is **not** included in this repo. Download the raw images from:
-
-> https://www.robots.ox.ac.uk/~vgg/data/flowers/102/
-
-and unpack them so that flat image files (`.jpg`) live directly under `data/`.
-
----
-
-## Getting Started
+## Quickstart
 
 ```bash
 git clone https://github.com/franciszekparma/flovae.git
@@ -178,79 +121,77 @@ pip install -r requirements.txt
 
 **Dependencies:** `torch`, `torchvision`, `numpy`, `matplotlib`, `Pillow`, `tqdm`
 
-### Prepare data
+### 1 · Prepare data
 
-Download the Oxford 102 Flower images and place every `.jpg` file directly under `data/`. The dataset class will pick them up automatically.
+Download the [Oxford 102 Flower](https://www.robots.ox.ac.uk/~vgg/data/flowers/102/) images and drop every `.jpg` directly under `data/`.
 
-### Train
+### 2 · Train
 
 ```bash
-python train.py
+python code/train.py
 ```
 
-A checkpoint is written to `checkpoints/vae_epoch_{N}.pth` after every epoch, and `checkpoints/best_model.pth` is overwritten whenever the total loss improves.
+A checkpoint lands in `checkpoints/vae_epoch_{N}.pth` after every epoch. `checkpoints/best_model.pth` is overwritten whenever total loss improves.
 
-To **resume** from a saved checkpoint, set the following in `config.py`:
+To **resume**, set in `code/config.py`:
 
 ```python
 LOAD_WEIGHTS = True
-RESUME_EPOCH = 128   # the epoch number you want to start from
+RESUME_EPOCH = 128
 ```
 
-The trainer will load `checkpoints/vae_epoch_128.pth` (model + optimizer state) and continue from epoch 129.
-
-### Generate / reconstruct
+### 3 · Generate / reconstruct
 
 ```bash
-python vis_outs.py
+python code/vis_outs.py
 ```
 
-`vis_outs.py` loads `checkpoints/vae_epoch_{DISP_EPOCH}.pth`, encodes a random sample of real images, draws z via the reparameterization trick, decodes, denormalizes, and shows each reconstruction with `matplotlib`.
+Loads `checkpoints/vae_epoch_{DISP_EPOCH}.pth`, encodes a random sample, draws `z` via reparameterization, decodes, denormalizes, and shows each reconstruction.
+
+> All commands run from the repo root.
 
 ---
 
 ## Pretrained Weights
 
-You don't need to train from scratch. The trained weights at epoch 256 are available here:
+You don't need to train from scratch — epoch-256 weights are available:
 
 > **Google Drive:** https://drive.google.com/file/d/1d1xBw9PyHieS6IWYMfGlUz4XLphP0Qau/view?usp=sharing
 
-Download the file, place it in `checkpoints/` as `vae_epoch_256.pth`, set `DISP_EPOCH = 256` in `config.py`, and run:
+Drop the file in `checkpoints/` as `vae_epoch_256.pth`, set `DISP_EPOCH = 256` in `code/config.py`, and run `python code/vis_outs.py`.
 
-```bash
-python vis_outs.py
-```
+---
 
-The `checkpoints/` folder is otherwise not tracked in this repo, so this is the only way to get the trained weights without retraining.
+## Dataset
+
+**Oxford 102 Category Flower Dataset** (Nilsback & Zisserman, 2008) — 8,189 images across 102 categories.
+
+- Resized to 140×140, **center-cropped** to 128×128
+- Normalized with ImageNet stats so VGG sees its training distribution
+- Augmentation: HFlip, saturation boost, ColorJitter
 
 ---
 
 ## Hyperparameters
 
-Everything lives in [`config.py`](config.py).
+All configurable in [`code/config.py`](code/config.py).
 
-**Training**
-| | |
-|---|---|
-| Batch size | 64 |
-| Epochs | 256 |
-| Learning rate | 5e-5 |
-| Optimizer | AdamW |
-| KL β | 1.0 |
-| VGG perceptual weight | 10000 |
-| Image size | 128 × 128 (resize 140 → center crop 128) |
-| Augmentation | HFlip(0.5), saturation×1.3, ColorJitter(0.15, 0.1, 0.1, 0.05) |
+<table>
+<tr><th align="left">Training</th><th></th><th align="left">Model</th><th></th></tr>
+<tr><td>Batch size</td><td><code>64</code></td><td>Latent dim <code>z</code></td><td><code>256</code></td></tr>
+<tr><td>Epochs</td><td><code>256</code></td><td>Encoder/Decoder stages</td><td><code>4</code></td></tr>
+<tr><td>Learning rate</td><td><code>5e-5</code></td><td>Channels</td><td><code>3 → 32 → 64 → 128 → 256</code></td></tr>
+<tr><td>Optimizer</td><td><code>AdamW</code></td><td>GroupNorm groups</td><td><code>8</code></td></tr>
+<tr><td>KL β</td><td><code>1.0</code></td><td>Dropout (latent heads)</td><td><code>0.3</code></td></tr>
+<tr><td>VGG weight</td><td><code>10000</code></td><td>VGG cutoff</td><td>layers 0–22 (relu4_3)</td></tr>
+<tr><td>Image size</td><td>128 × 128</td><td></td><td></td></tr>
+</table>
 
-**Model**
-| | |
-|---|---|
-| Latent dim (z) | 256 |
-| Encoder stages | 4 (DoubleDownConv) |
-| Decoder stages | 4 (DoubleUpConv) |
-| Channel progression | 3 → 32 → 64 → 128 → 256 |
-| GroupNorm groups | 8 |
-| Dropout (latent heads) | 0.3 |
-| VGG cutoff | layers 0–22 (up to relu4_3) |
+---
+
+## Training Setup
+
+Trained on a **MacBook Pro (M4 Max)** using PyTorch's MPS backend. The model auto-selects `cuda` if available and falls back to `mps` otherwise — see `DEVICE` in `code/config.py`.
 
 ---
 
@@ -263,6 +204,4 @@ Everything lives in [`config.py`](config.py).
 
 ---
 
-## License
-
-MIT &copy; franciszekparma
+<p align="center"><sub>MIT &copy; franciszekparma</sub></p>
