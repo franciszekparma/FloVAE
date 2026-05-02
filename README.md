@@ -34,7 +34,7 @@
 | **Model** | Convolutional β-VAE with VGG perceptual loss |
 | **Resolution** | 128 × 128 RGB |
 | **Latent space** | 256-dimensional Gaussian |
-| **Trainable params** | ~6.3 M (encoder + decoder) |
+| **Trainable params** | ~10.6 M (encoder + decoder) |
 | **Training time** | ~3 h on Apple M4 Max (256 epochs) |
 
 ---
