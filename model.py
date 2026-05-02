@@ -160,6 +160,7 @@ class VAE(nn.Module):
       
       nn.Linear(2048, z_dim * 4),
       nn.LayerNorm(z_dim * 4),
+      nn.Dropout(0.3),
       nn.GELU(),
       
       nn.Linear(z_dim * 4, z_dim)
@@ -182,6 +183,7 @@ class VAE(nn.Module):
       
       nn.Linear(2048, z_dim * 4),
       nn.LayerNorm(z_dim * 4),
+      nn.Dropout(0.3),
       nn.GELU(),
       
       nn.Linear(z_dim * 4, z_dim)

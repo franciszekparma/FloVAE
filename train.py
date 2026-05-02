@@ -59,9 +59,10 @@ class FlowerDataset(Dataset):
 
 def main():
   transforms = TT.Compose([
-    TT.Resize((200, 200)),
+    TT.Resize((140, 140)),
     TT.CenterCrop((128, 128)),
     TT.RandomHorizontalFlip(0.5),
+    TT.Lambda(lambda x: TT.functional.adjust_saturation(x, saturation_factor=1.3)),
     TT.ColorJitter(0.15, 0.1, 0.1, 0.05),
     TT.ToTensor(),
     TT.Normalize([0.485, 0.456, 0.406],
@@ -71,44 +72,61 @@ def main():
   train_ds = FlowerDataset('data/', transforms)
   train_dl = DataLoader(
     train_ds,
-    batch_size=128,
+    batch_size=64,
     shuffle=True
   )
   
   model = VAE().to(DEVICE)
   
-  optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-  feat_loss = VGGLoss(weight=0.6, device=DEVICE)
+  optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
+  
+  feat_loss = VGGLoss(weight=10000, device=DEVICE)
   def loss_fn (y_preds, y, mean, logvar, beta=1.0):
     batch_size = y.shape[0]
     return F.mse_loss(y_preds, y, reduction='sum') / batch_size, beta * ((-0.5 * torch.sum(1 + logvar - mean**2 - torch.exp(logvar))) / batch_size), feat_loss(y_preds, y)
   
   
-  epochs = 128
+  total_epochs = 256
   
   save_dir = "checkpoints"
   os.makedirs(save_dir, exist_ok=True)
   best_loss = float('inf')
   
-  for epoch in tqdm(range(epochs)):
+  start_epoch = 0
+  best_loss = float('inf')
+  
+  
+  resume_path = os.path.join(save_dir, "vae_epoch_128.pth") 
+
+  if os.path.exists(resume_path):
+    print(f"Loading checkpoint: {resume_path}")
+    checkpoint = torch.load(resume_path, map_location=DEVICE, weights_only=False)
+    
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    start_epoch = checkpoint['epoch'] + 1
+    best_loss = checkpoint.get('loss', float('inf'))
+    print(f"Resuming from Epoch {start_epoch} with previous loss {best_loss:.5f}\n\n")
+  
+  for epoch in tqdm(range(start_epoch, total_epochs)):
     model.train()
     
     rec_losses = []
     kl_losses = []
-    feat_losses = []
+    p_losses = []
     
     for n_batch, X in enumerate(train_dl):
       X = X.to(DEVICE)
       
       y_preds, mean, logvar = model(X)
       
-      rec_loss, kl_loss, feat_loss = loss_fn(y_preds, X, mean, logvar)
+      rec_loss, kl_loss, p_loss = loss_fn(y_preds, X, mean, logvar)
 
-      loss = rec_loss + kl_loss + feat_loss
+      loss = rec_loss + kl_loss + p_loss
       
       rec_losses.append(rec_loss.item())
       kl_losses.append(kl_loss.item())
-      feat_losses.append(feat_loss.item())
+      p_losses.append(p_loss.item())
 
       optimizer.zero_grad()
       loss.backward()
@@ -118,11 +136,11 @@ def main():
 
     avg_rec_loss = sum(rec_losses) / len(rec_losses)
     avg_kl_loss = sum(kl_losses) / len(kl_losses)
-    avg_feat_loss = sum(feat_losses) / len(feat_losses)
-    total_epoch_loss = avg_rec_loss + avg_kl_loss + avg_feat_loss
+    avg_p_loss = sum(p_losses) / len(p_losses)
+    total_epoch_loss = avg_rec_loss + avg_kl_loss + avg_p_loss
     
     print(f"\nEpoch: {epoch}")
-    print(f"Rec Loss: {avg_rec_loss:.5f} | KL Loss: {avg_kl_loss:.5f} | Feat Loss: {avg_feat_loss:.5f}")
+    print(f"Rec Loss: {avg_rec_loss:.5f} | Feat Loss: {avg_p_loss:.5f} | KL Loss: {avg_kl_loss:.5f} ")
     
     epoch_checkpoint_path = os.path.join(save_dir, f"vae_epoch_{epoch+1}.pth")
     torch.save({

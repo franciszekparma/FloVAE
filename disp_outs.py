@@ -10,7 +10,7 @@ from model import VAE
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'mps'
 
-def show_samples(n=30):
+def show_samples(n=10):
   model = VAE().to(DEVICE)
   model.eval()
   
@@ -28,7 +28,7 @@ def show_samples(n=30):
   
   imgs = []
   transforms = TT.Compose([
-    TT.Resize((200, 200)),
+    TT.Resize((140, 140)),
     TT.CenterCrop((128, 128)),
     TT.ToTensor(),
     TT.Normalize([0.485, 0.456, 0.406],

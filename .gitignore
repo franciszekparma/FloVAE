@@ -3,3 +3,5 @@ data
 checkpoints
 __pycache__
 .DS_Store
+checkpoints_avg_model
+c.py
