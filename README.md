@@ -35,7 +35,7 @@
 | **Resolution** | 128 × 128 RGB |
 | **Latent space** | 256-dimensional Gaussian |
 | **Trainable params** | ~6.3 M (encoder + decoder) |
-| **Training time** | ~5 h on Apple M4 Max (256 epochs) |
+| **Training time** | ~3 h on Apple M4 Max (256 epochs) |
 
 ---
 
